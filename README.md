@@ -9,6 +9,14 @@
 - `data/foldseek_output` contains the foldseek output files
 - `data/raw` contains the protein sequences from each source
 
+#### Note on rclone
+- Data is backed up on Dropbox [here](https://www.dropbox.com/scl/fo/ow3quj34qnc9ssx1t3s48/ABPHfAW83K1I51vurVwVkqo?rlkey=yh2468xp4xlhqez6cnyyh77z4&st=qu9mn7py&dl=0).
+- [rclone](https://rclone.org/install/) can make backing up on Dropbox easier.
+- `sudo -v ; curl https://rclone.org/install.sh | sudo bash` to install
+- `rsync config` to configure
+- `rclone copy colabfold_output "remote:/Shared Data/AF2/colabfold_output" -P --ignore-existing` as an example, to copy the colabfold_output folder to Dropbox, observing progressing and ignoring duplicates.
+
+
 ### Install the software
 - Install [colabfold](https://github.com/YoshitakaMo/localcolabfold?tab=readme-ov-file#for-linux)
 - Install [foldseek](https://github.com/steineggerlab/foldseek?tab=readme-ov-file#installation)
