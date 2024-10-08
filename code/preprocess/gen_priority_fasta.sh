@@ -2,7 +2,7 @@
 # Define job name
 #SBATCH -J get_fasta
 #SBATCH -o get_fasta.out
-#SBATCH -p low
+#SBATCH -p nodes
 # Request the number of nodes
 #SBATCH -N 1
 # Request the number of cores
@@ -16,6 +16,11 @@
 # Define job array
 ##SBATCH --array=1-8
 
-source af2venv/bin/activate
+module purge
+module load apps/anaconda3/2023.03-poetry
+source /mnt/data1/users/software/anaconda/anaconda3-2023.03/etc/profile.d/conda.sh
 
-python gen_priority_1_fasta.py
+conda activate base
+conda activate AF_sequence_data_env
+
+python gen_priority_fasta.py

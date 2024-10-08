@@ -1,5 +1,7 @@
 import pandas as pd
 from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 import seaborn as sns
 import matplotlib.pyplot as plt
 import upsetplot as up
@@ -217,4 +219,243 @@ def gen_seq_source_chr_table(rm_stop_source_pro, all_seqs, filter=None):
 
 		source_df = pd.concat([source_df, pd.DataFrame(row, index=[0])])
 	
+	return source_df
+
+
+def make_priority_list(source_df, priority_list):
+	"""
+	Takes list of transcripts and checks if they are in the source DataFrame, returning a list of 'T' or 'F' for each row.
+	Args:
+		source_df (pd.DataFrame): The source DataFrame containing the data to be checked.
+		priority_list (list): A list of transcript names that are considered priority.
+	Returns:
+		list: A list of 'T' or 'F' indicating whether each row in the source DataFrame contains any of the priority IDs.
+	"""
+    
+	priority_T_F = []
+    
+	print('Making priority list...')
+	for i, row in tqdm(source_df.iterrows(), total=source_df.shape[0]):
+        
+        # check every column for a match.
+		id_cols = ['RAP-DB - official',
+			'Ensembl - official', 'MSU - official',
+			'MSU - TE', 'OsNip', 'UniProt']
+
+		# turn row into string
+		source_string = '|'.join(row[id_cols].values.astype(str))
+
+		# set default to False
+		is_priority = 'F'
+  
+		for id in priority_list:
+			if id in source_string:
+				is_priority = 'T'
+				break
+
+		priority_T_F.append(is_priority)
+  
+	return priority_T_F
+
+
+def save_fasta(current_chr, fasta_chunk, records_for_fasta, JOB_NAME):
+	"""
+	Saves the records to a fasta file, with file name as "chr_chunk.fasta".
+	"""
+    
+    # chr changed to reorder, reset to original
+	if current_chr == 999:
+		current_chr = 'UNKNOWN'
+	elif current_chr == 998:
+		current_chr = 'ERROR'
+    
+	fasta_name = os.path.join('fastas_for_colabfold', JOB_NAME, f'{current_chr}_{fasta_chunk}.fasta')
+	with open(fasta_name, "w") as output_handle:
+		SeqIO.write(records_for_fasta, output_handle, "fasta")
+
+
+def to_priority_df(source_df, priority):
+	"""
+	Returns a DataFrame containing only the rows where the priority column is 'T'.
+	"""
+    
+	priority_df = source_df[source_df[priority] == 'T']
+	priority_df['idx'] = priority_df.index
+	return priority_df
+
+
+def make_fastas(priority_df, JOB_NAME):
+	"""
+	Splits the priority DataFrame into chunks of 20 and saves them to a fasta file.
+	"""
+    
+	# initial values
+	fasta_chunk = 1  # n fasta has been chunked per chr
+	current_chr = 1 # current chromosome being used
+	count_per_fasta = 0  # records in fasta
+	records_for_fasta = []  # records to be written to fasta
+
+	print('Making fastas...')
+	for i in tqdm(range(len(priority_df)), total=len(priority_df)):
+		
+		# itterows breaks because idx has been changed
+		row = priority_df.iloc[i]
+
+		if i == 0:
+			print(i)
+			print(row['seq'])
+		
+		new_chr = row['maj_vot_chr']
+		
+		if new_chr == current_chr:
+
+			one_sequence = Seq(data=row['seq'])
+			one_record = SeqRecord(one_sequence, id=str(row['idx']), description="")
+			records_for_fasta.append(one_record)
+	
+			count_per_fasta += 1
+
+			# max 20 seqs per fasta file
+			if count_per_fasta == 20:
+				
+				save_fasta(current_chr, fasta_chunk, records_for_fasta, JOB_NAME)
+
+				fasta_chunk += 1
+
+				# reset the records going into the fasta
+				current_chr = new_chr
+				count_per_fasta = 0
+				records_for_fasta = []
+
+		else:
+			# must be new chromosome
+			# check there are records to save, then save final fasta for that chr
+	
+			if len(records_for_fasta) != 0:
+				save_fasta(current_chr, fasta_chunk, records_for_fasta, JOB_NAME)
+
+			# reset chunk for the new chromosome
+			fasta_chunk = 1
+	
+			# add the first record for the new chromosome
+			records_for_fasta = []
+			one_sequence = Seq(data=row['seq'])
+			one_record = SeqRecord(one_sequence, id=str(row['idx']), description="")
+			records_for_fasta.append(one_record)
+
+			# reset the records going into the fasta
+			current_chr = new_chr
+			count_per_fasta = 1
+
+	# save final record
+	save_fasta(current_chr, fasta_chunk, records_for_fasta, JOB_NAME)
+
+
+def get_sequences(source_df, priority_list):
+	"""
+	Given a list of 'T' and 'F' values, returns a list of sequences from the source DataFrame where the value is 'T'.
+	"""
+	
+	priority_seqs = []
+ 
+	# check every column for a match.
+	id_cols = ['RAP-DB - official',
+		'Ensembl - official', 'MSU - official',
+		'MSU - TE', 'OsNip', 'UniProt']
+
+	print('Getting sequences...')
+ 
+	all_seqs = source_df['seq'].tolist()
+ 
+	for i in tqdm(range(len(priority_list))):
+		if priority_list[i] == 'T':
+			priority_seqs.append(all_seqs[i])
+	
+	return priority_seqs
+
+
+def check_for_duplicates(old_source_df, priority_1_all, priority_2_all, priority_3_all, priority_4_all):
+	"""
+	Checks for duplicates between the priority lists and returns a list of sequences that are unique to each priority list.
+	If a sequence is in an earlier priority list, it will not be included in the later priority lists.
+	"""
+    
+	priority_1_seqs = get_sequences(old_source_df, priority_1_all)
+	priority_2_seqs = get_sequences(old_source_df, priority_2_all)
+	priority_3_seqs = get_sequences(old_source_df, priority_3_all)
+	priority_4_seqs = get_sequences(old_source_df, priority_4_all)
+    
+    # check sequences against each other
+	priority_2_not_inc_1 = []
+	priority_3_not_inc_1_2 = []
+	priority_4_not_inc_1_2_3 = []
+ 
+	print('Checking for duplicates...')
+ 
+	# check not in 2 for 1
+	priority_1_set_seqs = list(set(priority_1_seqs))
+ 
+	for seq in priority_2_seqs:
+		if seq not in priority_1_set_seqs:
+			priority_2_not_inc_1.append(seq)
+   
+	# check not in 3 for 1, 2
+	priority_2_set_seqs = list(set(priority_2_seqs))
+ 
+	for seq in priority_3_seqs:
+		if seq not in priority_1_set_seqs and seq not in priority_2_set_seqs:
+			priority_3_not_inc_1_2.append(seq)
+   
+	# check not in 4 for 1, 2, 3
+	priority_3_set_seqs = list(set(priority_3_seqs))
+ 
+	for seq in priority_4_seqs:
+		if seq not in priority_1_set_seqs and seq not in priority_2_set_seqs and seq not in priority_3_set_seqs:
+			priority_4_not_inc_1_2_3.append(seq)
+   
+	priority_4_set_seqs = list(set(priority_4_seqs))
+ 
+	return priority_1_set_seqs, priority_2_set_seqs, priority_3_set_seqs, priority_4_set_seqs
+
+
+def add_cols_to_df(source_df, priority_1_set_seqs, priority_2_set_seqs, priority_3_set_seqs, priority_4_seqs):
+	"""
+	Adds columns to the source DataFrame indicating whether a sequence is in a priority list.
+	"""
+
+	priority_1_col = []
+	priority_2_col = []
+	priority_3_col = []
+	priority_4_col = []
+
+	seqs = source_df['seq'].tolist()
+ 
+	print('Adding columns to df...')
+ 
+	for seq in tqdm(seqs):
+		if seq in priority_1_set_seqs:
+			priority_1_col.append('T')
+		else:
+			priority_1_col.append('F')
+ 
+		if seq in priority_2_set_seqs:
+			priority_2_col.append('T')
+		else:
+			priority_2_col.append('F')
+ 
+		if seq in priority_3_set_seqs:
+			priority_3_col.append('T')
+		else:
+			priority_3_col.append('F')
+ 
+		if seq in priority_4_seqs:
+			priority_4_col.append('T')
+		else:
+			priority_4_col.append('F')
+   
+	source_df['priority_1'] = priority_1_col
+	source_df['priority_2'] = priority_2_col
+	source_df['priority_3'] = priority_3_col
+	source_df['priority_4'] = priority_4_col
+ 
 	return source_df
